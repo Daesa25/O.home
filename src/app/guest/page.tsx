@@ -17,21 +17,18 @@ export default function GuestbookPage() {
   const [body, setBody] = useState('');
   const [secret, setSecret] = useState(false);
   const [gName, setGName] = useState('');
-  const [gPw, setGPw] = useState('');
   const [q, setQ] = useState('');
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
   const [delFor, setDelFor] = useState<string | null>(null);
-  const [delPw, setDelPw] = useState('');
 
   const leave = () => {
     if (!body.trim()) { toast('내용을 입력해 주세요'); return; }
-    if (!user && (!gName.trim() || !gPw)) { toast('게스트는 닉네임과 비밀번호를 입력해 주세요'); return; }
+    if (!user && !gName.trim()) { toast('닉네임을 입력해 주세요'); return; }
     const e: GuestEntry = {
       id: newId(),
       author: user ? user.nickname : gName.trim(),
       authorId: user?.id,
-      guestPw: user ? undefined : gPw,
       body: body.trim(), secret, date: new Date().toISOString(), reply: null,
     };
     /* **뒤에 붙인다** (v2.0 사용자 발견 — 「방명록을 저장하지 못했습니다 · 권한 없음」).
@@ -40,7 +37,7 @@ export default function GuestbookPage() {
        방명록이 비어 있을 때만 글을 남길 수 있었다.** 댓글은 원래 뒤에 붙여서 멀쩡했다.
        화면에서는 아래 visible이 날짜 내림차순으로 정렬하므로 새 글이 여전히 맨 위에 온다. */
     setEntries([...entries, e]);
-    setBody(''); setSecret(false); setGName(''); setGPw('');
+    setBody(''); setSecret(false); setGName('');
     toast('방명록이 등록되었습니다');
     // 알림 (4.13) — 관리자에게 (본인 작성 제외)
     if (user?.id !== 'admin') {
@@ -57,10 +54,11 @@ export default function GuestbookPage() {
   const doDelete = () => {
     const e = entries.find(x => x.id === delFor);
     if (!e) return;
-    const allowed = isAdmin || (e.authorId && e.authorId === user?.id) || (e.guestPw && e.guestPw === delPw);
-    if (!allowed) { toast('비밀번호가 일치하지 않습니다'); return; }
+    // 손님 글은 관리자만 지운다 (v2.0 사용자 확정) — 서버가 그렇게밖에 못 받는다
+    const allowed = isAdmin || (!!e.authorId && e.authorId === user?.id);
+    if (!allowed) { toast('삭제 권한이 없습니다'); return; }
     setEntries(entries.filter(x => x.id !== delFor));
-    setDelFor(null); setDelPw('');
+    setDelFor(null);
     toast('삭제되었습니다');
   };
 
@@ -97,7 +95,7 @@ export default function GuestbookPage() {
         {!user && (
           /* 게스트 신원 — 오른쪽 정렬 (v1.9 사용자 요청), 컴팩트 GUEST 바 공용 UI */
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
-            <GuestIdBar name={gName} pw={gPw} onName={setGName} onPw={setGPw}
+            <GuestIdBar name={gName} onName={setGName}
               style={{ width: '100%', maxWidth: 380 }} />
           </div>
         )}
@@ -126,7 +124,7 @@ export default function GuestbookPage() {
                     답글
                   </span>
                 )}
-                {(isAdmin || (e.authorId && e.authorId === user?.id) || (!e.authorId && !user)) && (
+                {(isAdmin || (!!e.authorId && e.authorId === user?.id)) && (
                   <span style={{ cursor: 'var(--cur-pointer,pointer)', marginLeft: 8 }} onClick={() => setDelFor(e.id)}>삭제</span>
                 )}
               </small>
@@ -154,19 +152,13 @@ export default function GuestbookPage() {
         <KTextarea value={replyText} onChange={e => setReplyText(e.target.value)} placeholder="답글 내용" />
       </Modal>
 
-      {/* 삭제 확인 (게스트는 비밀번호 확인) */}
-      <Modal open={delFor !== null} onClose={() => { setDelFor(null); setDelPw(''); }} small title="방명록 삭제"
+      {/* 삭제 확인 — 손님 글은 관리자만 지울 수 있어 비밀번호를 묻지 않는다 (v2.0) */}
+      <Modal open={delFor !== null} onClose={() => setDelFor(null)} small title="방명록 삭제"
         actions={<>
-          <button className="btn btn-ghost" onClick={() => { setDelFor(null); setDelPw(''); }}>CANCEL</button>
+          <button className="btn btn-ghost" onClick={() => setDelFor(null)}>CANCEL</button>
           <button className="btn btn-accent" onClick={doDelete}>DELETE</button>
         </>}>
-        {(() => {
-          const e = entries.find(x => x.id === delFor);
-          const needPw = e && !e.authorId && !isAdmin;
-          return needPw
-            ? <KInput placeholder="작성 시 입력한 비밀번호" type="password" value={delPw} onChange={ev => setDelPw(ev.target.value)} />
-            : <p style={{ fontSize: 13, color: 'var(--sub)' }}>이 방명록을 삭제할까요?</p>;
-        })()}
+        <p style={{ fontSize: 13, color: 'var(--sub)' }}>이 방명록을 삭제할까요?</p>
       </Modal>
     </section>
   );
