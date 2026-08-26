@@ -34,7 +34,12 @@ export default function GuestbookPage() {
       guestPw: user ? undefined : gPw,
       body: body.trim(), secret, date: new Date().toISOString(), reply: null,
     };
-    setEntries([e, ...entries]);
+    /* **뒤에 붙인다** (v2.0 사용자 발견 — 「방명록을 저장하지 못했습니다 · 권한 없음」).
+       앞에 넣으면 기존 글의 순서 번호가 전부 한 칸씩 밀려서, 저장 단계가 그것들을 모두
+       「수정」으로 본다. 수정은 로그인한 사람만 할 수 있으므로 **비로그인 방문자는
+       방명록이 비어 있을 때만 글을 남길 수 있었다.** 댓글은 원래 뒤에 붙여서 멀쩡했다.
+       화면에서는 아래 visible이 날짜 내림차순으로 정렬하므로 새 글이 여전히 맨 위에 온다. */
+    setEntries([...entries, e]);
     setBody(''); setSecret(false); setGName(''); setGPw('');
     toast('방명록이 등록되었습니다');
     // 알림 (4.13) — 관리자에게 (본인 작성 제외)
@@ -67,9 +72,11 @@ export default function GuestbookPage() {
     setReplyFor(null); setReplyText('');
   };
 
-  const visible = q
+  // 최신 글이 위로 — 저장은 뒤에 붙이므로(위 참조) 보여 줄 때 날짜 내림차순으로 세운다
+  const visible = (q
     ? entries.filter(e => canRead(e) && (e.body.includes(q) || e.author.includes(q)))
-    : entries;
+    : entries
+  ).slice().sort((a, b) => b.date.localeCompare(a.date));
 
   // 방명록이 쌓이면 페이지로 (v2.0 사용자 요청) — 한 페이지 15개.
   // 답글이 달리면 한 칸이 길어지므로 도토리(12개)보다 조금만 늘렸다.
