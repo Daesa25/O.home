@@ -16,7 +16,7 @@ import { DiaryPost, DIARY_SEED } from '@/lib/diaryStore';
 import { newId } from '@/lib/postStore';
 import { useCommSettings, badgeStyle, CommBadge, CommSettings } from '@/lib/commStore';
 import {
-  useBoardSettings, boardBadgeStyle, BoardBadge,
+  useBoardSettings, boardBadgeStyle, BoardBadge, galleryCatsOf,
   useBoards, Board, BoardSkin, BoardPerm, DEFAULT_BOARD_CATS, MAIN_BOARD_ID,
 } from '@/lib/boardStore';
 import { useThreadSettings, ThreadWork, THREAD_SEED, ThreadCat, threadBadgeStyle, threadCats, threadCatsPatch } from '@/lib/threadStore';
@@ -29,7 +29,8 @@ import {
 } from '@/lib/menuStore';
 import { FEATURES } from '@/lib/menu';
 import { SectionsBlock } from '@/components/settings/SectionList';
-import { useSections, sectionMenuEntries, MAIN_SEC, inSection } from '@/lib/sectionStore';
+import { useSections, sectionsOf, sectionMenuEntries, MAIN_SEC, inSection } from '@/lib/sectionStore';
+import { useCustomLinks, linkEntries, toInternalPath } from '@/lib/linkStore';
 import { useSiteDraft } from '@/lib/siteStore';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCursorSettings, CursorState, CURSOR_STATE_LABEL } from '@/lib/cursorStore';
@@ -653,6 +654,13 @@ function BoardPane() {
   } = useBoardSettings();
   const { boards, setBoards, patchBoard } = useBoards();
   const [catBoard, setCatBoard] = useState(MAIN_BOARD_ID);   // 말머리 편집 대상 게시판
+  /* 갤러리 말머리도 갤러리마다 따로 (v2.0 사용자 요청) — 어느 갤러리 것을 고칠지 고른다.
+     하나뿐이면 고를 것이 없으니 선택 줄을 아예 두지 않는다 (감상타래와 같은 방식) */
+  const { list: secList } = useSections();
+  const galSecs = secList('gallery');
+  const [galSecSel, setGalSec] = useState(MAIN_SEC);
+  const galSec = galSecs.some(s2 => s2.id === galSecSel) ? galSecSel : MAIN_SEC;
+  const galCats = galleryCatsOf(st, galSec);
   const del = useConfirmDelete();
 
   const sel = boards.find(b => b.id === catBoard) ?? boards[0];
@@ -781,10 +789,21 @@ function BoardPane() {
         </div>
       ))}
 
-      {/* 갤러리 말머리 (v2.0 사용자 요청) — 예전에는 코드에 박혀 있어 바꿀 수 없었다 */}
+      {/* 갤러리 말머리 (v2.0 사용자 요청) — 예전에는 코드에 박혀 있어 바꿀 수 없었다.
+          여러 개로 만든 갤러리마다 따로 정한다 (v2.0 사용자 요청) */}
       <h3 style={{ marginTop: 20 }}>갤러리 말머리</h3>
-      <div className="d">그림백업 글쓰기에서 고르는 말머리 — ⠿ 드래그로 순서 · 추가·수정·삭제 자유</div>
-      <DragList items={st.galleryCats} keyOf={c => c.id} onReorder={setGalleryCats}
+      <div className="d">
+        그림백업 글쓰기에서 고르는 말머리 — ⠿ 드래그로 순서 · 추가·수정·삭제 자유
+        {galSecs.length > 1 && <><br />갤러리마다 따로 정합니다 — <b>손대기 전까지는 기본 갤러리의 말머리를 그대로 씁니다</b></>}
+      </div>
+      {galSecs.length > 1 && (
+        <div className="mini-seg" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
+          {galSecs.map(s2 => (
+            <button key={s2.id} className={galSec === s2.id ? 'on' : ''} onClick={() => setGalSec(s2.id)}>{s2.name}</button>
+          ))}
+        </div>
+      )}
+      <DragList items={galCats} keyOf={c => c.id} onReorder={next => setGalleryCats(galSec, next)}
         render={c => (
           <div className="set-row" style={{ width: '100%' }}>
             <div className="l" style={{ display: 'flex', gap: 11, alignItems: 'center' }}>
@@ -792,18 +811,18 @@ function BoardPane() {
               <span style={boardBadgeStyle(c)}>{c.label || '말머리'}</span>
             </div>
             <div className="cp-group" style={{ justifyContent: 'flex-end' }}>
-              <KInput value={c.label} onChange={e => patchGalleryCat(c.id, { label: e.target.value })}
+              <KInput value={c.label} onChange={e => patchGalleryCat(galSec, c.id, { label: e.target.value })}
                 style={{ width: 100, textAlign: 'right' }} />
-              {colorCells(c, p => patchGalleryCat(c.id, p))}
+              {colorCells(c, p => patchGalleryCat(galSec, c.id, p))}
               <span className="fx" data-tip="말머리 삭제"
                 onClick={() => del.ask(`말머리 「${c.label}」를 삭제하시겠습니까?`,
-                  () => removeGalleryCat(c.id),
+                  () => removeGalleryCat(galSec, c.id),
                   '이미 이 말머리로 등록된 글은 그대로 남습니다.')}>✕</span>
             </div>
           </div>
         )} />
       <button className="btn btn-ghost" style={{ marginTop: 8, padding: '7px 14px', fontSize: 11 }}
-        onClick={addGalleryCat}>＋ 말머리 추가</button>
+        onClick={() => addGalleryCat(galSec)}>＋ 말머리 추가</button>
 
       <hr style={{ margin: '24px 0', border: 'none', borderTop: '1.5px solid var(--line)' }} />
       {/* 갤러리·다이어리 등도 여러 개로 (v2.0 사용자 요청) — 목록이 몇 개인지는 여기 한곳에서 */}
@@ -1898,13 +1917,61 @@ function DataPane() {
   );
 }
 
+/** 멤버 선택 모달 (v2.0 사용자 요청) — 「비로그인 숨김」 메뉴를 특정 회원에게만.
+ *  검색으로 걸러 체크하고, 비우면 지금까지처럼 로그인한 모든 회원. 관리자는 항상 볼 수 있어 목록에 없다 */
+function MemberPickModal({ initial, onApply, onClose, desc }: {
+  initial: string[]; onApply: (ids: string[]) => void; onClose: () => void;
+  desc?: string;   // 무엇에 대한 선택인지 — 노출 제한/글쓰기 권한이 같은 모달을 쓴다 (v2.0)
+}) {
+  const pool = useMembers().filter(p => p.id !== 'admin' && p.role !== 'admin');
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState<string[]>(initial);
+  const t = q.trim().toLowerCase();
+  const list = pool.filter(p => !t || p.nickname.toLowerCase().includes(t) || p.id.toLowerCase().includes(t));
+  return (
+    <Modal open small title="멤버 선택" onClose={onClose}
+      desc={desc ?? '체크한 회원(그리고 관리자)에게만 이 메뉴가 보이고 열립니다 — 비우면 로그인한 모든 회원'}
+      actions={<>
+        <button className="btn btn-ghost" onClick={onClose}>CANCEL</button>
+        <button className="btn btn-accent" onClick={() => { onApply(sel); onClose(); }}>적용</button>
+      </>}>
+      <div style={{ display: 'grid', gap: 9 }}>
+        <KInput placeholder="닉네임·아이디 검색" value={q} onChange={e => setQ(e.target.value)} />
+        <div style={{ maxHeight: 240, overflow: 'auto', display: 'grid', gap: 4, alignContent: 'start' }}>
+          {list.map(p => (
+            <KCheck key={p.id}
+              label={<span style={{ fontSize: 12.5 }}>{p.nickname} <small style={{ color: 'var(--faint)' }}>{p.id}</small></span>}
+              checked={sel.includes(p.id)}
+              onChange={v => setSel(s => (v ? [...s, p.id] : s.filter(x => x !== p.id)))} />
+          ))}
+          {list.length === 0 && (
+            <p className="hint" style={{ margin: 0 }}>
+              {pool.length === 0 ? '가입한 회원이 없습니다' : '검색과 일치하는 회원이 없습니다'}
+            </p>
+          )}
+        </div>
+        {/* 탈퇴 등으로 목록에 없는 선택이 남아 있으면 알려 준다 — 몰래 남아 계속 잠그는 일이 없게 */}
+        {sel.some(id => !pool.some(p => p.id === id)) && (
+          <p className="hint" style={{ margin: 0 }}>
+            회원 목록에 없는 선택 {sel.filter(id => !pool.some(p => p.id === id)).length}건이 있습니다 — 적용하면 그대로 유지됩니다
+          </p>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 /** 메뉴 관리 탭 (5.2 — 메뉴 선택제) — 노출·순서·이름 + 메뉴별 부속 설정 */
 function MenuPane() {
   const [ms, patch, msLoaded] = useMenuSettings();
   // 글에도 적용 (v2.0 사용자 요청) — 아래 applyVis 참조
   const { user } = useAuth();
   const [visBusy, setVisBusy] = useState(false);
+  // 「주소로는 열람 허용」을 켤 때 띄우는 확인 (v2.0 사용자 요청)
+  const [openAsk, setOpenAsk] = useState<(() => void) | null>(null);
   const [visAsk, setVisAsk] = useState(false);
+  // 멤버 선택 모달 (v2.0 사용자 요청) — 「비로그인 숨김」·갤러리 글쓰기를 특정 회원으로 좁힌다
+  const [memAsk, setMemAsk] = useState<{ ids: string[]; apply: (ids: string[]) => void; desc?: string } | null>(null);
   const [commSet, patchComm] = useCommSettings();
   const { boards, loaded: bLoaded, patchBoard } = useBoards();  // 추가 게시판 이름·자동 편입 동기화 + 권한
   const toast = useToast();
@@ -1912,7 +1979,12 @@ function MenuPane() {
   const saved = ms.tree ?? defaultTree();
   // 게시판 + 여러 개로 만든 섹션 — 메뉴가 아는 「추가 항목」 전체 (v2.0)
   const { map: secMap } = useSections();
-  const extraAll = [...boardEntries(boards), ...sectionMenuEntries(secMap)];
+  const { links, setLinks } = useCustomLinks();   // 커스텀 링크 (v2.0 사용자 요청)
+  // 새 커스텀 링크 입력 폼 (v2.0 사용자 제보 — 「주소를 적으면 이름 짓기 전에 올라간다」).
+  // 예전에는 ADD가 빈 행을 즉시 등록해, 주소를 치는 순간 미배치에 미완성 링크가 나타났다
+  const [nlName, setNlName] = useState('');
+  const [nlHref, setNlHref] = useState('');
+  const extraAll = [...boardEntries(boards), ...sectionMenuEntries(secMap), ...linkEntries(links)];
   const defLabel = (href: string) => menuLabelFor(href, extraAll) ?? href;
 
   // 드래프트 — 모든 편집(삭제 포함)은 SAVE를 눌러야 실제 메뉴에 반영 (v1.9 사용자 피드백)
@@ -1989,7 +2061,8 @@ function MenuPane() {
     setTimeout(() => el?.click(), 30);   // 보류했던 클릭 재실행 → 원래 목적지로
   };
 
-  // 트리 정규화(저장본 대상) — 사라진 기능(삭제된 게시판) 제거 + 새 게시판을 /board가 든 그룹에 자동 편입
+  /* 트리 정규화(저장본 대상) — 사라진 기능(삭제된 게시판) 제거.
+     **새로 만든 것을 자동으로 넣지는 않는다** (v2.0 사용자 확정) — 미배치에 머물게 둔다 */
   useEffect(() => {
     if (!msLoaded || !bLoaded) return;
     let next: MenuGroupNode[] = saved
@@ -1997,19 +2070,6 @@ function MenuPane() {
         ? (menuLabelFor(g.href, extraAll) === null ? null : g)
         : { ...g, items: g.items.filter(it => menuLabelFor(it.href, extraAll) !== null) }))
       .filter((g): g is MenuGroupNode => !!g);
-    const placed = new Set(next.flatMap(g => (g.href ? [g.href] : g.items.map(i => i.href))));
-    for (const b of extraAll) {
-      const href = b.href;
-      if (placed.has(href) || ms.removedBoards.includes(href)) continue;
-      const hi = next.findIndex(g => !g.href && g.items.some(i => i.href === b.anchor));
-      if (hi >= 0) {
-        const at = next[hi].items.findIndex(i => i.href === b.anchor);
-        next = next.map((g, i) => (i === hi
-          ? { ...g, items: [...g.items.slice(0, at + 1), { href }, ...g.items.slice(at + 1)] } : g));
-      } else {
-        next = [...next, { id: newGroupId(), label: b.name, href, items: [] }];
-      }
-    }
     if (JSON.stringify(next) !== JSON.stringify(saved)) patch({ tree: next });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msLoaded, bLoaded, boards, ms.tree]);
@@ -2018,8 +2078,8 @@ function MenuPane() {
   const placedSet = new Set(tree.flatMap(g => (g.href ? [g.href] : g.items.map(i => i.href))));
   const unplaced = [
     ...FEATURES.filter(f => !placedSet.has(f.href)),
-    // 게시판·갤러리·다이어리 등 여러 개로 만든 것도 여기 뜬다 (v2.0 사용자 요청) —
-    // 자동 배치된 자리가 마음에 안 들면 빼서 원하는 상위 메뉴로 다시 넣을 수 있다
+    // 게시판·갤러리·다이어리 등 여러 개로 만든 것도 여기 뜬다 (v2.0 사용자 요청).
+    // 자동 배치를 없앴으므로 **만들면 여기 머문다** — 원하는 상위 메뉴에 직접 넣는다
     ...extraAll.map(b => ({ href: b.href, label: b.name })).filter(x => !placedSet.has(x.href)),
   ];
 
@@ -2075,7 +2135,7 @@ function MenuPane() {
   // 메뉴별 부속 설정 — 기본 탭용 (표시 방식 등)
   const extraFor = (href: string) => {
     switch (href) {
-      case '/backup': return (
+      case '/gallery': return (
         <div className="mini-seg">
           <button className={ms.backupView === 'gal' ? 'on' : ''} onClick={() => patch({ backupView: 'gal' })}>기본: 갤러리</button>
           <button className={ms.backupView === 'list' ? 'on' : ''} onClick={() => patch({ backupView: 'list' })}>기본: 리스트</button>
@@ -2131,7 +2191,7 @@ function MenuPane() {
         </>
       );
     }
-    if (href === '/roadview') {
+    if (href === '/loadb') {
       return (
         <>
           {permSel('업로드', ms.roadUpload, v => patch({ roadUpload: v }))}
@@ -2139,8 +2199,56 @@ function MenuPane() {
         </>
       );
     }
+    // 갤러리 글쓰기 권한 (v2.0 사용자 요청) — 갤러리(섹션)마다 · 「글쓰기 멤버」로 특정 회원까지
+    if (href === '/gallery' || href.startsWith('/gallery?s=')) {
+      const key = href === '/gallery' ? MAIN_SEC : href.slice('/gallery?s='.length);
+      // 메뉴 주소에는 별명(slug)이 적혀 있을 수 있다 — id로 통일해 저장
+      const gsec = sectionsOf(secMap, 'gallery').find(s2 => s2.id === key || s2.slug === key);
+      if (!gsec) return null;
+      const gw = ms.galWrite?.[gsec.id] ?? 'member';
+      const gwIds = ms.galWriteMembers?.[gsec.id];
+      return (
+        <>
+          {gw === 'member' && (
+            <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 10.5 }}
+              onClick={() => setMemAsk({
+                ids: gwIds ?? [],
+                desc: '체크한 회원(그리고 관리자)만 이 갤러리에 글을 쓸 수 있습니다 — 비우면 로그인한 모든 회원',
+                apply: n => {
+                  const next = { ...ms.galWriteMembers };
+                  if (n.length) next[gsec.id] = n; else delete next[gsec.id];
+                  patch({ galWriteMembers: next });
+                },
+              })}>
+              {gwIds?.length ? `글쓰기 멤버 ${gwIds.length}명` : '글쓰기 멤버'}
+            </button>
+          )}
+          <KSelect minWidth={110} value={gw}
+            onChange={v => {
+              // 관리자 전용으로 바꾸면 멤버 선택은 함께 지운다 — 몰래 남아 있지 않게 (노출 제한과 같은 규칙)
+              const next = { ...ms.galWriteMembers };
+              if (v !== 'member') delete next[gsec.id];
+              patch({ galWrite: { ...ms.galWrite, [gsec.id]: v as MenuPerm }, galWriteMembers: next });
+            }}
+            options={[
+              { value: 'member', label: '글쓰기: 가입자' },
+              { value: 'admin', label: '글쓰기: 관리자' },
+            ]} />
+        </>
+      );
+    }
     return null;
   };
+
+  /* 「주소로는 열람 허용」 (v2.0 사용자 요청) — 메뉴·위젯에서는 감추되 들어오는 것만 열어 준다.
+     링크로만 돌릴 게시판을 만들려는 용도라, 켤 때 **주소를 아는 사람은 누구나 본다**는 점을
+     모달로 분명히 알린다(사용자 요청). 「전부 보임」에서는 이미 열려 있으므로 뜻이 없어 감춘다 */
+  const openChk = (v: MenuVis | undefined, open: boolean | undefined, onChange: (nv: boolean) => void) => (
+    (v ?? 'all') === 'all' ? null : (
+      <KCheck label={<span style={{ fontSize: 11 }}>주소로는 열람 허용</span>} checked={!!open}
+        onChange={nv => { if (nv) setOpenAsk(() => () => onChange(true)); else onChange(false); }} />
+    )
+  );
 
   // 공개범위 셀렉트 (v1.9) — 메뉴 자체 노출: 전부 / 비로그인 숨김 / 관리자만 (드래프트 — SAVE로 적용)
   const visSel = (v: MenuVis | undefined, onChange: (nv: MenuVis) => void) => (
@@ -2150,6 +2258,17 @@ function MenuPane() {
         { value: 'member', label: '비로그인 숨김' },
         { value: 'admin', label: '관리자만' },
       ]} />
+  );
+
+  /* 멤버 선택 (v2.0 사용자 요청) — 「비로그인 숨김」일 때만 뜨는 버튼.
+     검색 모달에서 고른 회원(+관리자)에게만 보이고 들어갈 수 있다 — 비우면 로그인한 모든 회원 */
+  const memberBtn = (v: MenuVis | undefined, ids: string[] | undefined, apply: (ids: string[] | undefined) => void) => (
+    v !== 'member' ? null : (
+      <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 10.5 }}
+        onClick={() => setMemAsk({ ids: ids ?? [], apply: n => apply(n.length ? n : undefined) })}>
+        {ids?.length ? `멤버 ${ids.length}명` : '멤버 선택'}
+      </button>
+    )
   );
   return (
     <div className="set-sec">
@@ -2175,7 +2294,13 @@ function MenuPane() {
       {mtab === 'perm' ? (
         /* ---------- 권한 탭 — 메뉴 공개범위 + 메뉴별 권한 부속 ---------- */
         <div>
-          <div className="d">공개범위는 메뉴 노출만 제어(전부 보임 / 비로그인 숨김 / 관리자만) — SAVE를 눌러야 반영 · 글쓰기·댓글 권한은 즉시 반영</div>
+          <div className="d">
+            공개범위는 메뉴 노출을 정합니다(전부 보임 / 비로그인 숨김 / 관리자만) — SAVE를 눌러야 반영 · 글쓰기·댓글 권한은 즉시 반영
+            <br />
+            「비로그인 숨김」 옆 <b>멤버 선택</b>으로 특정 회원에게만 보이게 좁힐 수 있습니다 — 비우면 로그인한 모든 회원
+            <br />
+            <b>주소로는 열람 허용</b>을 켜면 메뉴에서는 계속 감춰 두고 <b>주소를 아는 사람만 들어올 수 있는</b> 메뉴가 됩니다 — 링크로 돌릴 게시판에 씁니다
+          </div>
           {tree.map(g => (
             <div key={g.id} style={{ borderBottom: '1px dashed var(--line)', padding: '9px 0' }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2183,7 +2308,13 @@ function MenuPane() {
                 {g.href && <small style={{ color: 'var(--faint)', fontSize: 10.5 }}>{g.href}</small>}
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   {g.href && extraPerm(g.href)}
-                  {visSel(g.vis, nv => patchGroup(g.id, { vis: nv === 'all' ? undefined : nv }))}
+                  {openChk(g.vis, g.open, nv => patchGroup(g.id, { open: nv || undefined }))}
+                  {memberBtn(g.vis, g.visMembers, ids => patchGroup(g.id, { visMembers: ids }))}
+                  {visSel(g.vis, nv => patchGroup(g.id, {
+                    vis: nv === 'all' ? undefined : nv,
+                    ...(nv === 'all' ? { open: undefined } : {}),
+                    ...(nv !== 'member' ? { visMembers: undefined } : {}),
+                  }))}
                 </div>
               </div>
               {!g.href && g.items.map(it => (
@@ -2192,8 +2323,19 @@ function MenuPane() {
                   <small style={{ color: 'var(--faint)', fontSize: 10.5 }}>{it.href}</small>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     {extraPerm(it.href)}
+                    {openChk(it.vis, it.open, nv => patchGroup(g.id, {
+                      items: g.items.map(x => (x.href === it.href ? { ...x, open: nv || undefined } : x)),
+                    }))}
+                    {memberBtn(it.vis, it.visMembers, ids => patchGroup(g.id, {
+                      items: g.items.map(x => (x.href === it.href ? { ...x, visMembers: ids } : x)),
+                    }))}
                     {visSel(it.vis, nv => patchGroup(g.id, {
-                      items: g.items.map(x => (x.href === it.href ? { ...x, vis: nv === 'all' ? undefined : nv } : x)),
+                      items: g.items.map(x => (x.href === it.href
+                        ? {
+                          ...x, vis: nv === 'all' ? undefined : nv,
+                          ...(nv === 'all' ? { open: undefined } : {}),
+                          ...(nv !== 'member' ? { visMembers: undefined } : {}),
+                        } : x)),
                     }))}
                   </div>
                 </div>
@@ -2219,6 +2361,21 @@ function MenuPane() {
               </button>
             </div>
           </div>
+          {/* 멤버 선택 (v2.0 사용자 요청) — 검색으로 골라 그 회원(+관리자)에게만 */}
+          {memAsk && (
+            <MemberPickModal initial={memAsk.ids} onApply={memAsk.apply} desc={memAsk.desc}
+              onClose={() => setMemAsk(null)} />
+          )}
+
+          {/* 「주소로는 열람 허용」 확인 (v2.0 사용자 요청) — 켜는 순간 무엇이 열리는지 분명히 */}
+          <ConfirmModal open={!!openAsk} title="주소가 있는 모두에게 공개됩니다"
+            body={'메뉴에서는 계속 감춰지지만, 이 주소를 아는 사람은 로그인하지 않아도 들어와 볼 수 있습니다. 링크를 받은 사람이 다른 곳에 옮겨 적으면 그 사람들도 볼 수 있습니다. 정말 알려지면 안 되는 내용에는 쓰지 마세요.'}
+            onClose={() => setOpenAsk(null)}
+            buttons={[
+              { label: 'CANCEL', kind: 'ghost', onClick: () => setOpenAsk(null) },
+              { label: '알겠습니다', kind: 'dark', onClick: () => { openAsk?.(); setOpenAsk(null); } },
+            ]} />
+
           <ConfirmModal open={visAsk} title="글 공개범위를 서버에 적용할까요?"
             body={'비공개로 둔 메뉴의 글이 서버에서도 가려집니다. 각 글의 공개범위가 바뀌므로, 되돌리려면 글마다 직접 고쳐야 합니다.'}
             onClose={() => setVisAsk(false)}
@@ -2315,19 +2472,86 @@ function MenuPane() {
 
       <h3 style={{ marginTop: 26 }}>미배치 기능</h3>
       <div className="d">트리에 넣지 않은 기능 — 메뉴에 노출되지 않지만 데이터는 보존됩니다. 넣을 위치를 고르면 바로 배치</div>
-      {unplaced.map(f => (
-        <div key={f.href} className="set-row">
-          <div className="l" style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
-            <b style={{ fontSize: 12.5 }}>{f.label}</b>
-            <small style={{ color: 'var(--faint)', fontSize: 10.5 }}>{f.href}</small>
+      {unplaced.map(f => {
+        // 커스텀 링크는 미배치에서도 지울 수 있다 (v2.0 사용자 요청 — 「목록 자체에서 지우고 싶다」).
+        // 다른 기능(게시판·섹션 등)은 데이터가 있어 여기서 못 지운다 — 각자의 관리 화면에서
+        const link = links.find(l => l.href === f.href);
+        return (
+          <div key={f.href} className="set-row">
+            <div className="l" style={{ display: 'flex', gap: 10, alignItems: 'baseline' }}>
+              <b style={{ fontSize: 12.5 }}>{f.label}</b>
+              <small style={{ color: 'var(--faint)', fontSize: 10.5 }}>{f.href}</small>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <KSelect minWidth={130} value="" placeholder="배치할 위치"
+                onChange={v => placeUnplaced(f.href, v)} options={groupOptions()} />
+              {link && (
+                <button className="btn btn-ghost" style={{ padding: '3px 9px', fontSize: 10.5 }}
+                  onClick={() => del.ask(`커스텀 링크 「${link.name}」를 지우시겠습니까?`,
+                    () => setLinks(links.filter(x => x.id !== link.id)),
+                    '링크만 사라집니다 — 가리키던 페이지 자체는 그대로입니다.')}>삭제</button>
+              )}
+            </div>
           </div>
-          <KSelect minWidth={130} value="" placeholder="배치할 위치"
-            onChange={v => placeUnplaced(f.href, v)} options={groupOptions()} />
-        </div>
-      ))}
+        );
+      })}
       {unplaced.length === 0 && (
         <div style={{ padding: '10px 0', fontSize: 12, color: 'var(--faint)' }}>모든 기능이 메뉴에 배치되어 있습니다</div>
       )}
+
+      {/* 커스텀 링크 (v2.0 사용자 요청) — 사이트 안의 아무 페이지나 메뉴로.
+          만들면 위 미배치 목록에 나타나고, 거기서 원하는 상위 메뉴에 넣는다 */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginTop: 22 }}>
+        <h3 style={{ margin: 0 }}>커스텀 링크</h3>
+      </div>
+      <div className="d">
+        자관·캐릭터처럼 목록에서 골라야 갈 수 있던 페이지를 메뉴에서 바로 — 주소를 적어 두면 됩니다.
+        <br />
+        <b>내 홈 주소</b>는 붙여 넣으면 사이트 안 이동으로 바뀌고(예: <code>…/rels/latte</code> → <code>/rels/latte</code>),
+        <b>다른 사이트 주소</b>는 그대로 남아 새 창으로 열립니다.
+        만든 링크는 위 <b>미배치</b>에 나타나며, 거기서 원하는 상위 메뉴에 넣어 주세요.
+      </div>
+      {links.map(l => (
+        <div key={l.id} className="set-row">
+          <div className="l" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <KInput value={l.name} placeholder="메뉴에 보일 이름"
+              onChange={e => setLinks(links.map(x => (x.id === l.id ? { ...x, name: e.target.value } : x)))}
+              style={{ width: 140 }} />
+            <KInput value={l.href} placeholder="/rels/latte 또는 풀주소"
+              onChange={e => setLinks(links.map(x => (x.id === l.id ? { ...x, href: e.target.value } : x)))}
+              onBlur={e => setLinks(links.map(x => (x.id === l.id ? { ...x, href: toInternalPath(e.target.value) } : x)))}
+              style={{ width: 260 }} />
+          </div>
+          <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 10.5 }}
+            onClick={() => del.ask(`커스텀 링크 「${l.name}」를 지우시겠습니까?`,
+              () => {
+                setLinks(links.filter(x => x.id !== l.id));
+                // 메뉴에 배치돼 있었으면 그 자리도 함께 비운다 — 없는 주소가 남으면 눌러도 아무 일도 안 난다
+                setTree(tree.map(g => ({ ...g, items: g.items.filter(i => i.href !== l.href) })).filter(g => g.href !== l.href));
+              },
+              '메뉴에 배치해 두었다면 그 자리도 함께 비워집니다. 가리키던 페이지 자체는 그대로입니다.')}>DELETE</button>
+        </div>
+      ))}
+      {links.length === 0 && (
+        <div style={{ padding: '10px 0', fontSize: 12, color: 'var(--faint)' }}>아직 없습니다 — 아래에 이름과 주소를 적고 ADD를 눌러 주세요</div>
+      )}
+      {/* 새 링크는 폼을 채워 ADD를 눌러야 등록된다 (v2.0 사용자 제보) —
+          예전에는 빈 행이 즉시 등록돼, 주소를 치는 순간 이름도 없는 링크가 미배치에 나타났다 */}
+      <div className="set-row" style={{ borderTop: '1px dashed var(--line)' }}>
+        <div className="l" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <KInput value={nlName} placeholder="메뉴에 보일 이름" onChange={e => setNlName(e.target.value)} style={{ width: 140 }} />
+          <KInput value={nlHref} placeholder="/rels/latte 또는 풀주소" onChange={e => setNlHref(e.target.value)} style={{ width: 260 }} />
+        </div>
+        <button className="btn btn-dark" style={{ padding: '4px 12px', fontSize: 10.5 }}
+          onClick={() => {
+            if (!nlName.trim()) { toast('메뉴에 보일 이름을 입력해 주세요'); return; }
+            const href = toInternalPath(nlHref);
+            if (!href || href === '/') { toast('이동할 주소를 입력해 주세요'); return; }
+            setLinks([...links, { id: newId(), name: nlName.trim(), href }]);
+            setNlName(''); setNlHref('');
+            toast('링크가 만들어졌습니다 — 위 미배치에서 메뉴에 넣어 주세요');
+          }}>＋ ADD</button>
+      </div>
       </>
       )}
 
@@ -2764,7 +2988,7 @@ function BgmPane() {
 
 /** 폰트 목록 한 줄 — CSS URL 표시 · 수정(이름/family/URL, 업로드 폰트는 이름/한글 페어) · 삭제 */
 function FontRow({ f }: { f: FontDef }) {
-  const { fonts, updateFont, removeFont, setFontPair } = useFonts();
+  const { fonts, familyOf, updateFont, removeFont, resetFont, setFontPair } = useFonts();
   const del = useConfirmDelete();
   const toast = useToast();
   const [editing, setEditing] = useState(false);
@@ -2805,6 +3029,16 @@ function FontRow({ f }: { f: FontDef }) {
               if (updateFont(f.id, { name, family: f.fileId ? f.family : family, cssUrl: f.fileId ? '' : cssUrl })) { setEditing(false); toast('폰트가 수정되었습니다'); }
               else toast('이름과 font-family 값을 입력해 주세요');
             }}>SAVE</button>
+          {/* 내장 폰트를 처음 상태로 (v2.0 사용자 발견) — 이름·family·한글 페어를 한꺼번에 되돌린다.
+              잘못 들어간 값(엉뚱한 family, 지워진 폰트를 가리키는 페어)을 풀 방법이 없었다 */}
+          {f.builtin && (
+            <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}
+              onClick={() => {
+                resetFont(f.id);
+                setEditing(false);
+                toast(`「${f.name}」를 처음 상태로 되돌렸습니다`);
+              }}>기본값으로</button>
+          )}
           <button className="btn btn-ghost" style={{ whiteSpace: 'nowrap' }}
             onClick={() => { setEditing(false); setName(f.name); setFamily(f.family); setCssUrl(fontCssUrl(f) ?? ''); }}>CANCEL</button>
         </div>
@@ -2816,7 +3050,8 @@ function FontRow({ f }: { f: FontDef }) {
     <div className="set-row">
       <div className="l" style={{ minWidth: 0 }}>
         {/* 미리보기는 페어 반영 스택 — 영문 폰트+한글 페어면 한글이 페어 폰트로 보임 (v1.9) */}
-        <b style={{ fontFamily: f.pairId ? `${f.family}, ${fonts.find(x => x.id === f.pairId)?.family ?? ''}` : f.family, fontSize: 15 }}>{f.name} — 가나다 ABC 123</b>
+        {/* familyOf가 페어까지 합쳐 주고 var(--serif) 같은 별칭도 원본 스택으로 풀어 준다 (v2.0) */}
+        <b style={{ fontFamily: familyOf(f.id), fontSize: 15 }}>{f.name} — 가나다 ABC 123</b>
         <small style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {f.fileId
             ? `업로드 파일 — ${f.fileName ?? '폰트 파일'}${f.pairId ? ` · 한글 페어: ${fonts.find(x => x.id === f.pairId)?.name ?? ''}` : ''}`
@@ -2829,7 +3064,10 @@ function FontRow({ f }: { f: FontDef }) {
         {!f.locked && (
           <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 10.5 }}
             onClick={() => del.ask(`폰트 「${f.name}」를 삭제하시겠습니까?`, () => removeFont(f.id),
-                f.builtin ? '기본 폰트는 아래 [복원] 버튼으로 되살릴 수 있습니다.' : '직접 등록한 폰트는 복구할 수 없습니다. 이 폰트를 쓰던 항목 표시는 유지됩니다.')}>DELETE</button>
+                f.builtin
+                  ? '기본 폰트는 목록에서만 빠집니다 — 아래 [복원] 버튼으로 되살릴 수 있고, 이 폰트를 쓰던 항목 표시는 그대로입니다.'
+                  // 직접 등록한 폰트는 정의째 사라지므로 가리키던 자리도 함께 정리된다 (v2.0)
+                  : '직접 등록한 폰트는 복구할 수 없습니다. 이 폰트를 쓰도록 지정해 둔 자리(역할 폰트·한글 페어)는 기본값으로 되돌아갑니다.')}>DELETE</button>
         )}
       </div>
       {del.element}
@@ -2944,8 +3182,17 @@ function SettingsInner() {
     return () => mq.removeEventListener('change', f);
   }, []);
 
-  // 테마 미리보기는 이 페이지 안에서만 — SAVE 없이 벗어나면 저장본으로 원복 (v1.9)
-  const { dirty, discard, save } = useTheme();
+  /* 미리보기는 이 페이지 안에서만 — SAVE 없이 벗어나면 저장본으로 원복 (v1.9).
+     **색만 지키고 있었다** (v2.0 사용자 발견 — 「폰트 바꾸고 SAVE 안 했는데 화면 전환이 되고
+     적용돼 있어」). 디자인 탭의 SAVE는 색·역할 폰트·로고/탭 제목 **셋**을 함께 저장하는데,
+     이탈 경고와 원복은 색(useTheme)만 보고 있었다. 나머지 둘은 모듈·프로바이더에 사는
+     드래프트라 페이지를 떠나도 사라지지 않아, 저장한 것처럼 계속 적용된 채로 남았다. */
+  const { dirty: themeDirty, discard: themeDiscard, save: themeSave } = useTheme();
+  const { rolesDirty, saveRoles, discardRoles } = useFonts();
+  const siteDraft = useSiteDraft();
+  const dirty = themeDirty || rolesDirty || siteDraft.dirty;
+  const save = () => { themeSave(); saveRoles(); siteDraft.save(); };
+  const discard = () => { themeDiscard(); discardRoles(); siteDraft.discard(); };
   const themeRef = useRef({ dirty, discard });
   themeRef.current = { dirty, discard };
   useEffect(() => () => { if (themeRef.current.dirty) themeRef.current.discard(); }, []);
